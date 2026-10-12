@@ -141,7 +141,7 @@ class UplayPlugin(Plugin):
             try:
                 await self._parse_subscription_games()
             except Exception as e:
-                log.warning(f"Parsing subscriptions failed, most likely account without subscription {repr(e)}")
+                log.warning("Ubisoft+ catalogue import unavailable: %r", e)
 
             self.owned_games_sent = True
 
@@ -284,6 +284,12 @@ class UplayPlugin(Plugin):
                             continue
 
                         product_id = str(product_ids_by_space.get(space_id) or '').strip()
+
+                        for existing in self.games_collection:
+                            if (existing.from_local_configuration and not existing.space_id
+                                    and product_id and product_id in (existing.install_id, existing.launch_id)):
+                                # Metadata enrichment must preserve IDs already exported from local configurations.
+                                existing.galaxy_id = existing.galaxy_id or existing.launch_id
 
                         detailed_games.append(UbisoftGame(
                             space_id=space_id,
@@ -697,7 +703,12 @@ class UplayPlugin(Plugin):
         return None
 
     async def get_subscription_games(self, subscription_name: str, context: Any) -> AsyncGenerator[List[SubscriptionGame], None]:
-        yield context
+        # Galaxy's CollectionImporter awaits this method before iterating batches.
+        return self._subscription_game_batches(context)
+
+    @staticmethod
+    async def _subscription_game_batches(context):
+        yield context or []
 
     if SYSTEM == System.WINDOWS:
         async def prepare_local_size_context(self, game_ids: List[str]) -> Any:

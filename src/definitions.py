@@ -62,15 +62,14 @@ class UbisoftGame(object):
     status: str = GameStatus.Unknown
     activation_id: str = ''
     from_local_configuration: bool = False
+    galaxy_id: str = ''
 
     def as_local_game(self):
-        if not self.space_id:
-            return LocalGame(self.launch_id, GameStatusTranslator[self.status])
-        else:
-            return LocalGame(self.space_id, GameStatusTranslator[self.status])
+        return LocalGame(self.galaxy_id or self.space_id or self.launch_id,
+                         GameStatusTranslator[self.status])
 
     def as_galaxy_game(self):
-        passed_id = self.space_id if self.space_id else self.launch_id
+        passed_id = self.galaxy_id or self.space_id or self.launch_id
         return Game(passed_id, self.name, [], LicenseInfo(LicenseType.SinglePurchase))
 
 @dataclass

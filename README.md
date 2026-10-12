@@ -72,6 +72,10 @@ For the first synchronization after installing or updating the plugin:
 
 Restart Galaxy and the store app and try one synchronization. If the problem remains, collect a fresh log. A database reset is not required for this.
 
+### Ubisoft+ Catalogue Availability
+
+Accounts without Ubisoft+ are detected through Ubisoft's subscription-status service. The legacy Ubisoft+ game catalogue service is currently unreachable, so catalogue imports for subscribed accounts may remain unavailable. During network failures, timeouts, temporary server errors or rate limits, the last confirmed catalogue for the current account and session is retained. Without confirmed data, the subscription import reports a failure instead of marking the subscription inactive. Owned-game library imports use separate data sources.
+
 ### 🧪 Create a Fresh Diagnostic Log
 
 1. Close GOG Galaxy completely, including the system tray application.

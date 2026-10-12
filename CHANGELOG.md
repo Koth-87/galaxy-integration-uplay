@@ -4,6 +4,18 @@ All notable changes to this plugin will be documented in this file.
 
 ---
 
+## v2.0.12-64bit
+
+### Fixed for Version 2.0.12-64bit
+
+- **Owned-Game Metadata Request Rejected With HTTP 400:** Removed an unused GraphQL variable from the ownership metadata query. Ubisoft now accepts the request, allowing names and platform metadata to be retrieved for entitled games instead of relying only on existing local entries and the Club fallback.
+- **Existing Game IDs During Metadata Enrichment:** Games imported from local configurations without a Ubisoft space ID retain their existing Galaxy ID when online metadata supplies that space ID. This prevents metadata enrichment from replacing their library identity while keeping the space ID available for Ubisoft API requests.
+- **Unnecessary Ubisoft+ Vault Requests Without a Subscription:** The plugin now checks Ubisoft's subscription-status service first. A confirmed missing subscription skips the unreachable legacy vault host. Request-specific headers no longer modify shared session headers, keeping the subscription lookup separate from other Ubisoft API requests.
+- **Ubisoft+ Outages Reported as an Inactive Subscription:** Network failures, timeouts, temporary server errors and rate limits retain the last confirmed subscription catalogue for the current account and session. Without confirmed catalogue data, the import reports a failure instead of marking the subscription inactive. Subscription-status access errors remain errors rather than being treated as a missing subscription.
+- **Subscription-Game Import Interface:** The subscription-games method now returns its asynchronous batches from an awaitable method, as required by Galaxy's importer. Accounts without subscription games return an empty batch.
+
+---
+
 ## v2.0.11-64bit
 
 ### Fixed in Version 2.0.11-64bit

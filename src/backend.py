@@ -9,7 +9,8 @@ import aiohttp
 import asyncio
 import time
 
-from galaxy.api.errors import AuthenticationRequired, AccessDenied, NetworkError, UnknownError
+from galaxy.api.errors import (AuthenticationRequired, AccessDenied, NetworkError, UnknownError,
+                               BackendTimeout, BackendNotAvailable, BackendError, TooManyRequests)
 
 from consts import UBISOFT_APPID, CHROME_USERAGENT
 
@@ -31,6 +32,7 @@ class BackendClient():
         self._refresh_retry_at = 0
         self._authentication_lost = False
         self._closing = False
+        self._subscription_catalogue = None
         connector = create_tcp_connector(limit=30)
         headers = {
             'Authorization': None,
@@ -52,9 +54,15 @@ class BackendClient():
         await self._session.close()
 
     async def request(self, method, url, *args, **kwargs):
+        allowed_statuses = kwargs.pop('allowed_statuses', ())
+        if allowed_statuses:
+            kwargs['raise_for_status'] = False
         with handle_exception():
             try:
-                return await self._session.request(method, url, *args, **kwargs)
+                response = await self._session.request(method, url, *args, **kwargs)
+                if allowed_statuses and response.status not in allowed_statuses:
+                    response.raise_for_status()
+                return response
             except aiohttp.ClientResponseError as error:
                 if error.status >= 500:
                     log.warning(
@@ -104,9 +112,12 @@ class BackendClient():
                         type(error).__name__)
 
     async def _do_request(self, method, *args, **kwargs):
+        include_status = kwargs.pop('include_status', False)
         if not kwargs or 'headers' not in kwargs:
             log.info("No headers in kwargs, using session headers")
-            kwargs['headers'] = self._session.headers
+            kwargs['headers'] = dict(self._session.headers)
+        else:
+            kwargs['headers'] = dict(kwargs['headers'])
         if 'add_to_headers' in kwargs:
             for header in kwargs['add_to_headers']:
                 kwargs['headers'][header] = kwargs['add_to_headers'][header]
@@ -115,7 +126,7 @@ class BackendClient():
         r = await self.request(method, *args, **kwargs)
         j = await r.json()  # all ubi endpoints return jsons
         log.info(f"Response status: {r}")
-        return j
+        return (r.status, j) if include_status else j
 
     async def _do_request_safe(self, method, *args, **kwargs):
         result = {}
@@ -349,10 +360,9 @@ class BackendClient():
         payload = {
             'operationName': 'GetOwnedGames',
             'variables': {
-                'spaceIds': space_ids,
-                'shouldIncludeStatsFields': False
+                'spaceIds': space_ids
             },
-            'query': "query GetOwnedGames($spaceIds: [String!], $shouldIncludeStatsFields: Boolean = false) {"
+            'query': "query GetOwnedGames($spaceIds: [String!]) {"
                      "  games(spaceIds: $spaceIds) {"
                      "    id"
                      "    spaceId"
@@ -408,16 +418,35 @@ class BackendClient():
 
     async def get_subscription(self):
         try:
-            sub_games = await self._do_request('get', "https://api-uplayplusvault.ubi.com/v1/games")
-        except AccessDenied:
-            log.info("Uplay plus Subscription not active")
-            return None
-        except NetworkError:
-            # Ubisoft+ is optional. A temporary vault outage must not make
-            # Galaxy mark the complete subscription import as failed.
-            log.warning("Ubisoft+ subscription endpoint is temporarily unavailable; skipping this sync")
-            return None
-        return sub_games
+            status, subscription = await self._do_request_safe(
+                'get', f"https://ess.ubi.com/account/{self.user_id}/subscription",
+                add_to_headers={'Ubi-AppId': '5c5d3b21-e1fc-4460-9213-87b4cd440d44'},
+                allowed_statuses=(404,), include_status=True,
+            )
+            if status == 404:
+                if isinstance(subscription, dict) and subscription.get('detail') == 'Could not find the subscription':
+                    self._subscription_catalogue = None
+                    log.info("Ubisoft+ subscription not active")
+                    return None
+                raise UnknownError("Unexpected Ubisoft+ subscription status response")
+            if status != 200 or not isinstance(subscription, dict):
+                raise UnknownError("Unexpected Ubisoft+ subscription status response")
+            try:
+                sub_games = await self._do_request('get', "https://api-uplayplusvault.ubi.com/v1/games")
+            except AccessDenied:
+                self._subscription_catalogue = None
+                log.info("Uplay plus Subscription not active")
+                return None
+            if not isinstance(sub_games, dict) or not isinstance(sub_games.get('games'), list):
+                raise UnknownError("Unexpected Ubisoft+ catalogue response")
+            self._subscription_catalogue = (self.user_id, sub_games)
+            return sub_games
+        except (NetworkError, BackendTimeout, BackendNotAvailable, BackendError, TooManyRequests):
+            if self._subscription_catalogue is not None and self._subscription_catalogue[0] == self.user_id:
+                log.warning("Ubisoft+ unavailable; retaining the last confirmed subscription catalogue")
+                return self._subscription_catalogue[1]
+            log.warning("Ubisoft+ unavailable; subscription state could not be refreshed")
+            raise
 
     async def activate_game(self, activation_id):
         r = await self._do_request_safe('post', f"https://api-uplayplusvault.ubi.com/v1/games/activate/{activation_id}")
